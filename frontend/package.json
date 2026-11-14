@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "verify": "esbuild scripts/verify-anomaly.ts --bundle --format=esm --platform=node --alias:@=./src --outfile=node_modules/.cache/verify-anomaly.mjs && node node_modules/.cache/verify-anomaly.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

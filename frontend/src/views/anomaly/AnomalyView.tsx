@@ -1,90 +1,53 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
-import { downloadEntries, listEntries, moduleMeta, runAction as applyAction } from '@/api/local-service'
-import type { EntryRow } from '@/data/types'
+import { anomalyStats, resetAnomaly } from '@/api/anomaly-service'
+import type { ActionResult } from '@/data/types'
 
-const meta = moduleMeta('anomaly')
-const columns = [
-  "规则编号",
-  "监控指标",
-  "基线均值",
-  "标准差倍数",
-  "检测周期",
-  "告警级别",
-  "静默窗口分钟",
-  "通知渠道"
-]
-const actions = [
-  "提交校验",
-  "启用检测",
-  "停用检测"
-]
-const statuses = [
-  "草稿",
-  "待校验",
-  "已启用",
-  "已停用"
-]
-const stats = [
-  {
-    "label": "检测规则总数",
-    "value": 0
-  },
-  {
-    "label": "已启用规则",
-    "value": 0
-  },
-  {
-    "label": "待校验规则",
-    "value": 0
-  }
-]
+import BatchPanel from './BatchPanel'
+import EventPanel from './EventPanel'
+import LogPanel from './LogPanel'
+import RulePanel from './RulePanel'
+import RunPanel from './RunPanel'
+import SamplePanel from './SamplePanel'
+
+const TABS = [
+  { key: 'rules', label: '检测规则' },
+  { key: 'samples', label: '样本流' },
+  { key: 'runs', label: '检测批次' },
+  { key: 'events', label: '告警事件' },
+  { key: 'batches', label: '通知批次' },
+  { key: 'logs', label: '状态日志' },
+] as const
+
+type TabKey = (typeof TABS)[number]['key']
 
 export default function AnomalyView() {
-  const [rows, setRows] = useState<EntryRow[]>([])
-  const [total, setTotal] = useState(0)
-  const [errorMessage, setErrorMessage] = useState('')
-  const [filters, setFilters] = useState<Record<string, string>>({})
-  const filterFields = useMemo(() => columns.slice(0, 3), [])
-
-  const reload = useCallback(() => {
-    setErrorMessage('')
-    try {
-      const payload = listEntries(meta.key, filters)
-      setRows(payload.items)
-      setTotal(payload.total)
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : '异常检测列表读取失败')
-    }
-  }, [filters])
+  const [tab, setTab] = useState<TabKey>('rules')
+  const [token, setToken] = useState(0)
+  const [stats, setStats] = useState<{ label: string; value: number }[]>([])
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null)
 
   useEffect(() => {
-    reload()
-  }, [reload])
+    setStats(anomalyStats())
+  }, [token])
 
-  function runAction(action: string, row: EntryRow) {
-    setErrorMessage('')
-    const result = applyAction(meta.key, Number(row.id), action)
-    if (!result.ok) {
-      setErrorMessage(result.message)
-      return
-    }
-    reload()
-  }
+  const handleDone = useCallback((result: ActionResult) => {
+    setMessage({ ok: result.ok, text: result.message })
+    setToken((value) => value + 1)
+  }, [])
 
   return (
     <section className="page" data-module="anomaly">
       <header className="page-head">
         <div>
           <h2>异常检测管理</h2>
-          <p className="page-desc">维护异常检测规则的输入、执行约束与结果记录，为数据异常发现提供可验证的数据工程流程。</p>
+          <p className="page-desc">
+            按监控指标的基线均值与标准差倍数判定异常；命中样本、静默窗口结果与通知批次全程关联留证，每一次判定都能说明依据。
+          </p>
         </div>
         <div className="page-actions">
-          <button className="btn primary" type="button" onClick={() => setErrorMessage('检测规则登记入口尚未接入审批流')}>
-            登记检测规则
-          </button>
-          <button className="btn" type="button" onClick={() => downloadEntries(meta.key)}>
-            导出异常检测清单
+          <button className="btn ghost" type="button" onClick={() => handleDone(resetAnomaly())}>
+            重置演示数据
           </button>
         </div>
       </header>
@@ -98,63 +61,27 @@ export default function AnomalyView() {
         ))}
       </div>
 
-      <p className="status-legend">
-        {statuses.map((status: string) => (
-          <span key={status} className="legend-item">
-            {status}：{rows.filter((row) => String(row.status) === status).length}
-          </span>
+      <nav className="tab-bar">
+        {TABS.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            className={tab === item.key ? 'tab-item active' : 'tab-item'}
+            onClick={() => setTab(item.key)}
+          >
+            {item.label}
+          </button>
         ))}
-      </p>
+      </nav>
 
-      <form className="filter-bar" onSubmit={(event) => { event.preventDefault(); reload() }}>
-        {filterFields.map((field) => (
-          <label key={field} className="filter-item">
-            <span>{field}</span>
-            <input
-              value={filters[field] ?? ''}
-              placeholder={`按${field}检索`}
-              onChange={(event) => setFilters((prev) => ({ ...prev, [field]: event.target.value }))}
-            />
-          </label>
-        ))}
-        <button className="btn" type="submit">查询</button>
-        <button className="btn ghost" type="button" onClick={() => setFilters({})}>重置条件</button>
-      </form>
+      {message && <p className={message.ok ? 'action-message ok' : 'action-message fail'}>{message.text}</p>}
 
-      <table className="data-table">
-        <thead>
-          <tr>
-            {columns.map((column) => <th key={column}>{column}</th>)}
-            <th>当前状态</th>
-            <th>可执行动作</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={String(row.id)}>
-              {columns.map((column) => <td key={column}>{row[column] ?? '—'}</td>)}
-              <td>{row.status}</td>
-              <td className="row-actions">
-                {actions.map((action) => (
-                  <button key={action} className="link" type="button" onClick={() => runAction(action, row)}>
-                    {action}
-                  </button>
-                ))}
-              </td>
-            </tr>
-          ))}
-          {rows.length === 0 && (
-            <tr>
-              <td className="empty-state" colSpan={columns.length + 2}>暂无异常检测数据，可先登记检测规则</td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-
-      <footer className="page-foot">
-        <span>共 {total} 条异常检测记录</span>
-        {errorMessage && <span className="error-text">{errorMessage}</span>}
-      </footer>
+      {tab === 'rules' && <RulePanel token={token} onDone={handleDone} />}
+      {tab === 'samples' && <SamplePanel token={token} onDone={handleDone} />}
+      {tab === 'runs' && <RunPanel token={token} />}
+      {tab === 'events' && <EventPanel token={token} onDone={handleDone} />}
+      {tab === 'batches' && <BatchPanel token={token} onDone={handleDone} />}
+      {tab === 'logs' && <LogPanel token={token} />}
     </section>
   )
 }
